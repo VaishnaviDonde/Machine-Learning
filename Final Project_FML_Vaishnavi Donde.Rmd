@@ -1,0 +1,207 @@
+---
+title: "FML_Final Project"
+author: "VaishnaviD"
+date: "2024-04-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment=NA, warning = FALSE, message = FALSE)
+```
+
+
+## Assignment Purpose 
+The objectives of this assignment are threefold:\
+1. To use real-world data \
+2. To use the appropriate machine learning technique for the business problem, and \
+3. To present the solution to top-level management. 
+
+## Project Objective and Information
+
+The Portuguese Bank has noticed a dip in their revenue, which they traced back to insufficient long-term investments by their customers. To address this, the bank plans to pinpoint customers who are more likely to invest in long-term deposits and then direct their marketing efforts towards these individuals. The information relates to the marketing efforts conducted by a bank in Portugal. These campaigns involved making phone calls to clients and sometimes multiple times, to determine if the clients would subscribe to a bank term deposit. There are two sets of data. The "train.csv" contains all instances (32950 in total) with 21 inputs including the target feature. The entries are arranged by date from May 2008 to November 2010.
+
+Project Objective:- The main aim is to predict if a client will subscribe (yes/no) to a term deposit.
+
+To load required library.
+
+```{r}
+library(dplyr)
+library(class)
+library(caret)
+library(ggplot2)
+library(lattice)
+library(e1071)
+library(rpart)
+library(rattle)
+library(corrplot)
+```
+
+To specify the file location.
+```{r}
+train <- read.csv("C:\\Users\\Vaishnavi\\OneDrive - Kent State University\\FML\\Final Project\\new_train.csv")
+```
+
+**Data Exploration**
+
+To confirm that all the data has been properly imported.
+```{r}
+summary(train)
+head(train)
+tail(train)
+dim(train)
+str(train)
+```
+
+Dataset contains two types of data. It has 5 numerical variables and 11 categorical variables.
+
+**Data Prepartion/Cleaning**
+
+```{r}
+#To check if there are any missing/unknown values in the dataset
+sum(complete.cases(train))
+train.clean <- subset(train, !apply(train == "unknown", 1, any))
+```
+
+**No missing values were found but there were rows containing unknown data, which have been excluded**
+
+To calculate Z-scores for numeric variables in a dataframe, find outliers by setting a Z-score threshold of 3 and remove rows with these outliers. This method helps remove extreme data points that might skew our analysis, ensuring our results are dependable.
+
+```{r}
+numeric_v <- c("age", "duration", "campaign", "pdays", "previous")
+zscore <- scale(train[, numeric_v])
+outliers <- apply(abs(zscore) > 3, 1, any)
+outliers_i <- which(outliers)
+train.1 <- train.clean[-outliers_i, ]
+```
+
+**Feature Selection**
+
+Transforming categorical variables (for eg.marital status,education level,etc)  which simplifies their analysis and interpretation in statistical models.
+
+```{r}
+train.1[c("marital","education","job", "default","housing","loan","contact","month","day_of_week","poutcome","y")] <- lapply(train.1[c("marital","education","job", "default","housing","loan","contact","month","day_of_week","poutcome","y")],factor)
+
+# Applying conversion to numerical values to all factor variables
+train.1[c("marital","education","job", "default","housing","loan","contact","month","day_of_week","poutcome","y")] <- lapply(train.1[c("marital","education","job", "default","housing","loan","contact","month","day_of_week","poutcome","y")], function(x) as.numeric(factor(x, levels = unique(x))))
+```
+
+Now lets create a linear regression model to predict the variable y using other variables in the dataset and assess the importance of each predictor by looking at the P value. (Lower P values indicate higher significance)
+
+```{r}
+lm_model <- lm(y ~ ., data = train.1)
+summary(lm_model)
+```
+
+Using ANOVA to evaluate the significance of the fitted model by comparing it to a simpler model and checking if the predictors together significantly impact the outcome.
+
+```{r}
+anova(lm_model)
+```
+
+Use significance codes to determine the importance of each predictor in a model (where *** means highly significant,* means less significant and blank means not significant). Then removing non-significant variables like "default," "housing," "loan," "day_of_week," and "previous."
+
+```{r}
+train.1 <- train.1[,-c(5,6,7,10,14)]
+```
+
+Now lets make corrplot : 
+```{r}
+cor = cor(train.1)
+corrplot(cor, method = "circle",tl.cex=0.5)
+```
+
+The corrplot shows that no two independent variables have a high correlation, either positive or negative. This means there is no issue of multicollinearity, so we are not removing any variables.
+
+**Descriptive Statistics**
+Boxplot -  Plotting boxplot for all numerical variables.\
+Pdays is a variable with 26 categories so we will exclude it from the boxplots.
+
+```{r}
+par(ask = FALSE, mfrow = c(1,3))
+for (variable in c("age", "duration", "campaign")) {
+  boxplot(train.1[[variable]], col =  "blue", ylab = variable)
+}
+```
+
+These charts show that the average values for age, duration and campaign are on the lower side, indicating that the data is skewed towards lower values or are skewed to the left.
+
+Histogram - Plotting histrogram for all variables \
+```{r}
+par(mfrow=c(2,2))
+for (i in 1:ncol(train.1)) {
+  hist(train.1[, i], freq = TRUE, main = paste("Distribution of", colnames(train.1)[i]), xlab = colnames(train.1)[i], col = "orange")
+}
+```
+
+Now by looking at the histogram, we can confirm that the data for age, duration and campaign exhibits left skewness.
+
+**Predictive Analytics**
+
+Let's Normalize the data for further analysis and transforming categorical variables into dummy variables
+```{r}
+norm_data <- preProcess(train.1[,c("age","duration","campaign","pdays")], method = c("center", "scale"))
+
+train.1[,c("age","duration","campaign","pdays") ] <- predict(norm_data, newdata = train.1[,c("age","duration","campaign","pdays")])
+```
+
+```{r}
+train.1[c("marital","education","job","contact","month","poutcome","y")] = lapply(train.1[c("marital","education","job","contact","month","poutcome","y")],factor)
+train.cy = train.1[c("contact","y")]
+dummy_data <- dummyVars(~.-contact-y, data = train.1)
+train.1 <-as.data.frame(predict(dummy_data,train.1))
+train.1 = cbind(train.1,train.cy)
+```
+
+Lets make training and testing datasets : Now partitioning the data into training (70%) and testing (30%) set.
+```{r}
+set.seed(150)
+train_index <- createDataPartition(train.1$y, p = 0.7, list = FALSE)
+training.df <- train.1[train_index, ]
+test.df <- train.1[-train_index, ]
+dim(training.df)
+dim(test.df)
+```
+
+## Naive Baye's Classifier
+Now lets train the Naive Bayes Model, Predict on validation data and evaluate the predictions.
+```{r}
+nb_model <- naiveBayes(y ~ ., data = training.df)
+test_predictions <- predict(nb_model, test.df)
+confusionMatrix(as.factor(test_predictions), as.factor(test.df$y))
+```
+
+The model's accuracy is about 86.24%, meaning it gets most predictions right. 
+The model exhibits high sensitivity (True Positive Rate) of 91.55% which indicates 
+that it correctly identifies a high proportion of actual positive instances.The specificity (True Negative Rate) is relatively low at 49.03% which says that the model has difficulty in correctly identiyfying negative instances. True positives and true negatives show how well the model sorts each class correctly, while false positives and false negatives reveal where it messes up. To improve accuracy, the model might need some adjustments to reduce these mistakes and improve the overall accuracy.
+
+## KNN - classifier
+Now let's find the best k value to reach high accuracy.
+```{r}
+accuracy <- data.frame(k = seq(1, 15, 1), overallaccuracy = rep(0, 15))
+for(i in 1:30) {
+pred <- class::knn(train = training.df, test = test.df, cl = training.df$y, k = i)
+accuracy[i, 2] <- confusionMatrix(pred, as.factor(test.df$y),positive = "1")$overall[1]
+}
+which(accuracy[,2] == max(accuracy[,2]))
+# Plotting the scatter points
+plot(accuracy$k, accuracy$overallaccuracy,col = "blue", pch = 19,
+     xlab = "K", ylab = "Accuracy", main = "Accuracy vs. K")
+abline(v = 7, col = "red", lwd = 2, lty = 2)
+ 
+# Adding the line plot
+lines(accuracy$k, accuracy$overallaccuracy, col = "blue")
+```
+
+As shown in the graph, we find that the best k value is 7. Next, we'll use the k-nearest neighbors (kNN) technique to classify items in the test group. Then, we'll make a confusion matrix to gauge the accuracy and effectiveness of the classification model.
+
+
+```{r}
+pred_1 <- class::knn(train = training.df, test = test.df, cl = training.df$y, k = 7)
+confusionMatrix(as.factor(pred_1),as.factor(test.df$y))
+```
+
+The model boasts an impressive accuracy of 95.96%, meaning it accurately predicts the class for most cases. It shows a high sensitivity (True Positive Rate) of 99.17% and a moderate specificity (True Negative Rate) of 73.49%. This indicates that it's good at spotting true positives and handling false positives fairly well.
+
+## Conclusion
+
+The main goal of the project is to find the best model for our dataset. We tested two algorithms: Naive Bayes and KNN. Although Naive Bayes showed high sensitivity, the KNN model performed better overall, with higher accuracy and better specificity. So, we chose the KNN model as the best option for predicting potential term deposit subscribers among existing bank customers.
